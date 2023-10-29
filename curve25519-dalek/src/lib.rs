@@ -86,6 +86,8 @@ pub mod constants;
 // External (and internal) traits.
 pub mod traits;
 
+pub mod ecdlp;
+
 //------------------------------------------------------------------------
 // curve25519-dalek internal modules
 //------------------------------------------------------------------------
