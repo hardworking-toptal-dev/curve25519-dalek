@@ -9,7 +9,7 @@
 // - isis agora lovecruft <isis@patternsinthevoid.net>
 // - Henry de Valence <hdevalence@hdevalence.ca>
 
-// #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(
     all(
         curve25519_dalek_backend = "simd",
@@ -87,6 +87,7 @@ pub mod constants;
 pub mod traits;
 
 /// Decoding ristretto points to integers.
+#[cfg(feature = "ecdlp")]
 pub mod ecdlp;
 
 //------------------------------------------------------------------------
