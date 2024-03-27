@@ -154,6 +154,14 @@ impl ProgressTableGenerationReportFunction for NoOpProgressTableGenerationReport
     }
 }
 
+/// A trait for automatically converting a closure into a progress report function.
+impl<F: Fn(f64, ReportStep) -> ControlFlow<()>> ProgressTableGenerationReportFunction for F {
+    #[inline(always)]
+    fn report(&self, progress: f64, step: ReportStep) -> ControlFlow<()> {
+        self(progress, step)
+    }
+}
+
 pub mod table_generation {
     //! Generate the precomputed tables.
 
