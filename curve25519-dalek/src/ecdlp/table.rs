@@ -145,11 +145,11 @@ pub trait ProgressTableGenerationReportFunction {
     fn report(&self, progress: f64, step: ReportStep) -> ControlFlow<()>;
 }
 
-struct NoOpProgressTableGenerationReportFunction;
+/// A no-op progress report function.
+pub struct NoOpProgressTableGenerationReportFunction;
 
 impl ProgressTableGenerationReportFunction for NoOpProgressTableGenerationReportFunction {
     fn report(&self, _progress: f64, _step: ReportStep) -> ControlFlow<()> {
-        println!("Progress: {:.2}% {:?}", _progress * 100.0, _step);
         ControlFlow::Continue(())
     }
 }

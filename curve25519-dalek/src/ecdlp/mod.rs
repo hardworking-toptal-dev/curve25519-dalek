@@ -95,7 +95,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub use table::{table_generation, ECDLPTablesFileView, ProgressTableGenerationReportFunction, ReportStep};
+pub use table::{table_generation, ECDLPTablesFileView, ProgressTableGenerationReportFunction, NoOpProgressTableGenerationReportFunction, ReportStep};
 
 use table::{BATCH_SIZE, L2};
 
