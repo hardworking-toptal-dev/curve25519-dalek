@@ -3,6 +3,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
+use std::ops::ControlFlow;
 
 use crate::constants::RISTRETTO_BASEPOINT_POINT;
 use crate::field::FieldElement;
@@ -126,17 +127,46 @@ impl<'a, const L1: usize> CuckooT1HashMapView<'a, L1> {
     }
 }
 
+/// A progress report step.
+/// This is used to report progress to the user and give additional context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportStep {
+    /// Generating T1 points.
+    T1PointsGeneration,
+    /// Setting up the T1 cuckoo hashmap.
+    T1CuckooSetup,
+    /// Generating the T2 table.
+    T2Table,
+}
+
+/// A trait for reporting progress during table generation.
+pub trait ProgressTableGenerationReportFunction {
+    /// Run the progress report function.
+    fn report(&self, progress: f64, step: ReportStep) -> ControlFlow<()>;
+}
+
+struct NoOpProgressTableGenerationReportFunction;
+
+impl ProgressTableGenerationReportFunction for NoOpProgressTableGenerationReportFunction {
+    fn report(&self, _progress: f64, _step: ReportStep) -> ControlFlow<()> {
+        println!("Progress: {:.2}% {:?}", _progress * 100.0, _step);
+        ControlFlow::Continue(())
+    }
+}
+
 pub mod table_generation {
     //! Generate the precomputed tables.
+
     use super::*;
 
-    fn t1_cuckoo_setup(
+    fn t1_cuckoo_setup<P: ProgressTableGenerationReportFunction>(
         cuckoo_len: usize,
         j_max: usize,
         all_entries: &[CompressedFieldElement],
         t1_values: &mut [u32],
         t1_keys: &mut [u32],
-    ) {
+        progress_report: &P,
+    ) -> std::io::Result<()> {
         use core::mem::swap;
 
         /// Dumb cuckoo rehashing threshold.
@@ -149,7 +179,10 @@ pub mod table_generation {
             let mut old_hash_id = 1u8;
 
             if i % (j_max / 1000 + 1) == 0 {
-                log::info!("T1 hashmap generation [{}/{}]", i, j_max);
+                let progress = i as f64 / j_max as f64;
+                if let ControlFlow::Break(_) = progress_report.report(progress, ReportStep::T1CuckooSetup) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Interrupted by progress report"));
+                }
             }
 
             for j in 0..CUCKOO_MAX_INSERT_SWAPS {
@@ -179,15 +212,16 @@ pub mod table_generation {
                 }
             }
         }
+
+        Ok(())
     }
 
-    fn create_t1_table(l1: usize, dest: &mut [u8]) -> std::io::Result<()> {
+    fn create_t1_table<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as f64 * 1.3) as usize;
 
         let mut all_entries = vec![Default::default(); j_max + 1];
 
-        log::info!("Computing all the points...");
         let acc = RistrettoPoint::identity().0;
         let step = RISTRETTO_BASEPOINT_POINT.0.mul_by_cofactor(); // table is based on number*cofactor
         
@@ -198,7 +232,9 @@ pub mod table_generation {
             let point = acc; // i * G
 
             if i % (j_max / 1000 + 1) == 0 {
-                log::info!("T1 point computation [{}/{}]", i, j_max);
+                if let ControlFlow::Break(_) = progress_report.report(i as f64 / j_max as f64, ReportStep::T1PointsGeneration) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Interrupted by progress report"));
+                }
             }
 
             all_entries[i] = point.u.as_bytes();
@@ -209,14 +245,14 @@ pub mod table_generation {
         let mut t1_keys = vec![0u32; cuckoo_len];
         let mut t1_values = vec![0u32; cuckoo_len];
 
-        log::info!("Setting up the cuckoo hashmap...");
         t1_cuckoo_setup(
             cuckoo_len,
             j_max,
             &all_entries,
             &mut t1_values,
             &mut t1_keys,
-        );
+            progress_report,
+        )?;
 
         let (t1_keys_dest, t1_values_dest) = dest.split_at_mut(cuckoo_len * size_of::<u32>());
         let t1_keys_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_keys_dest);
@@ -225,11 +261,10 @@ pub mod table_generation {
         t1_keys_dest.copy_from_slice(&t1_keys);
         t1_values_dest.copy_from_slice(&t1_values);
 
-        log::info!("Done :)");
         Ok(())
     }
 
-    fn create_t2_table(l1: usize, dest: &mut [u8]) -> std::io::Result<()> {
+    fn create_t2_table<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
         let two_to_l1 = EdwardsPoint::mul_base(&Scalar::from(1u32 << l1)); // 2^l1
         let two_to_l1 = two_to_l1.mul_by_cofactor(); // clear cofactor
 
@@ -238,6 +273,10 @@ pub mod table_generation {
         let two_to_l1 = AffineMontgomeryPoint::from(&two_to_l1);
         let mut acc = two_to_l1;
         for j in 1..I_MAX {
+            if let ControlFlow::Break(_) = progress_report.report(j as f64 / I_MAX as f64, ReportStep::T2Table) {
+                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Interrupted by progress report"));
+            }
+
             arr[j - 1] = acc.into();
             acc = acc.addition_not_ct(&two_to_l1);
         }
@@ -256,9 +295,18 @@ pub mod table_generation {
     /// Generate the ECDLP precomputed tables file.
     /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
+    /// No progress report will be done.
     pub fn create_table_file(l1: usize, dest: &mut [u8]) -> std::io::Result<()> {
+        create_table_file_with_progress_report(l1, dest, NoOpProgressTableGenerationReportFunction)
+    }
+
+    /// Generate the ECDLP precomputed tables file.
+    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// The byte array length should be the return value of [`table_file_len`].
+    /// This function will report progress using the provided function.
+    pub fn create_table_file_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: P) -> std::io::Result<()> {
         let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
-        create_t2_table(l1, t2_bytes)?;
-        create_t1_table(l1, t1_bytes)
+        create_t2_table(l1, t2_bytes, &progress_report)?;
+        create_t1_table(l1, t1_bytes, &progress_report)
     }
 }

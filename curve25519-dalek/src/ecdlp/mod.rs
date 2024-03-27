@@ -95,7 +95,7 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub use table::{table_generation, ECDLPTablesFileView};
+pub use table::{table_generation, ECDLPTablesFileView, ProgressTableGenerationReportFunction, ReportStep};
 
 use table::{BATCH_SIZE, L2};
 
@@ -491,38 +491,25 @@ mod tests {
     use rand::Rng;
     use std::fs::{File, OpenOptions};
 
-    fn init() {
-        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-            .is_test(true)
-            .try_init();
-    }
-
     #[test]
     fn gen_t1_t2() {
-        init();
+        let l1 = 26;
+        let path = format!("ecdlp_table_{l1}.bin");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)
+            .unwrap();
 
-        // for l1 in 10..=28
-        {
-            let l1 = 26;
-            let path = format!("ecdlp_table_{l1}.bin");
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(path)
-                .unwrap();
-            file.set_len(table_generation::table_file_len(l1) as _)
-                .unwrap();
-            let mut mapped = unsafe { memmap::MmapOptions::new().map_mut(&file).unwrap() };
-            table_generation::create_table_file(l1, &mut mapped).unwrap();
-        }
+        file.set_len(table_generation::table_file_len(l1) as _)
+            .unwrap();
+        let mut mapped = unsafe { memmap::MmapOptions::new().map_mut(&file).unwrap() };
+        table_generation::create_table_file(l1, &mut mapped).unwrap();
     }
 
     #[test]
-    // #[cfg(ecdlp_test_needs_table_generated)]
     fn test_ecdlp_26_cofactors() {
-        init();
-
         let ecdlp_table_file = File::open("ecdlp_table_26.bin").unwrap();
         let bytes = unsafe { memmap::MmapOptions::new().map(&ecdlp_table_file).unwrap() };
         let tables = ECDLPTablesFileView::<'_, 26>::from_bytes(&bytes);
@@ -550,10 +537,7 @@ mod tests {
     }
 
     #[test]
-    // #[cfg(ecdlp_test_needs_table_generated)]
     fn test_ecdlp_26() {
-        init();
-
         let ecdlp_table_file = File::open("ecdlp_table_26.bin").unwrap();
         let bytes = unsafe { memmap::MmapOptions::new().map(&ecdlp_table_file).unwrap() };
         let tables = ECDLPTablesFileView::<'_, 26>::from_bytes(&bytes);
