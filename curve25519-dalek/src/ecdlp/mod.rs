@@ -86,7 +86,8 @@ mod affine_montgomery;
 mod table;
 
 use crate::{
-    backend::serial::u64::constants::MONTGOMERY_A_NEG, constants::RISTRETTO_BASEPOINT_POINT as G,
+    constants::MONTGOMERY_A_NEG,
+    constants::RISTRETTO_BASEPOINT_POINT as G,
     field::FieldElement, RistrettoPoint, Scalar,
 };
 use affine_montgomery::AffineMontgomeryPoint;
